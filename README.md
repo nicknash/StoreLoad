@@ -31,7 +31,7 @@ r1 = x0;
 Then, if x0 and x1 are both initially zero, after both threads are finished, it's possible to observe r0 = r1 = 0.
 This is (maybe) surprising, as this execution is not **sequentially consistent**, i.e., there's no way to take the instructions of the first and second thread and interleave them somehow to get to this result. Instead, we'd have to re-order the store (i.e., x_i = 1) with the load (i.e., r_i = x_i).
 
-Now, C# has a fairly strong memory model itself, where all stores have release semantics. This makes exposing the behaviour of the processor re-ordering especially simple in C#. 
+Now, C# has a fairly strong memory model itself, but it doesn't rule out the JIT itself performing a store-load re-ordering. I've tried to rule out the JIT getting involved by specifying MethodImplOptions.NoOptimization on the methods performing the important assignments to x_i and r_i. I've never seen it officially documented that this rules out compiler re-orderings, but my experience is that it does.
 
 The full code is [here](Program.cs)
 
