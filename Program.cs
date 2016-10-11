@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading;
+using System.Runtime.CompilerServices;
 
 namespace StoreLoad
 {
@@ -11,7 +12,7 @@ namespace StoreLoad
         private static AutoResetEvent second = new AutoResetEvent(false);
         private static Barrier barrier = new Barrier(3);
 
-        private static Action memoryBarrier;
+        private static Action maybeMemoryBarrier;
         public static void Main(string[] args)
         {
             if(args.Length < 1)
@@ -20,7 +21,7 @@ namespace StoreLoad
                 return;
             }
             bool useMemoryBarriers = args.Length >= 2;
-            memoryBarrier = useMemoryBarriers ? (Action) Interlocked.MemoryBarrier : () => {};
+            maybeMemoryBarrier = useMemoryBarriers ? (Action) Interlocked.MemoryBarrier : () => {};
             
             var firstThread = new Thread(FirstThreadFunction){IsBackground = true};
             var secondThread = new Thread(SecondThreadFunction){IsBackground = true};
@@ -63,25 +64,27 @@ namespace StoreLoad
             }
         }
 
+        [MethodImplAttribute(MethodImplOptions.NoOptimization)]
         private static void FirstThreadFunction()
         {
             while(true)
             {
                 first.WaitOne();
                 x0 = 1;
-                memoryBarrier();
+                maybeMemoryBarrier();
                 r0 = x1;
                 barrier.SignalAndWait();
             }
         }
 
+        [MethodImplAttribute(MethodImplOptions.NoOptimization)]
         private static void SecondThreadFunction()
         {
             while(true)
             {
                 second.WaitOne();
                 x1 = 1;
-                memoryBarrier();
+                maybeMemoryBarrier();
                 r1 = x0;
                 barrier.SignalAndWait();
             }
