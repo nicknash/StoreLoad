@@ -1,13 +1,21 @@
-﻿using System;
+﻿//#define USE_VOLATILE_OPS
+
+using System;
 using System.Threading;
 using System.Runtime.CompilerServices;
+
 
 namespace StoreLoad
 {
     public class Program
     {
+#if USE_VOLATILE_DECLS
+        private static volatile int x0, x1;
+        private static volatile int r0, r1;
+#else
         private static int x0, x1;
         private static int r0, r1;
+#endif
         private static AutoResetEvent first = new AutoResetEvent(false);
         private static AutoResetEvent second = new AutoResetEvent(false);
         private static Barrier barrier = new Barrier(3);
@@ -33,12 +41,21 @@ namespace StoreLoad
             
             for(int i = 0; i < numIterations; ++i)
             {
+#if USE_VOLATILE_OPS
+                Volatile.Write(ref x0, 0);
+                Volatile.Write(ref x1, 0);
+#else
                 x0 = x1 = 0;
+#endif
                 first.Set(); // Allow the two threads to run
                 second.Set();
                 barrier.SignalAndWait(); // Ensure that they both actually ran
                 
+#if USE_VOLATILE_OPS
+                if(Volatile.Read(ref r0) == 0 && Volatile.Read(ref r1) == 0)
+#else
                 if(r0 == 0 && r1 == 0) // Check for a re-ordering.
+#endif                
                 {
                     ++numNonSeqCst;
                     Console.WriteLine($"StoreLoad re-ordering #{numNonSeqCst} detected after {i + 1} iterations: x0 = {x0}, x1 = {x1}");
