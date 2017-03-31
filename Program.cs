@@ -1,4 +1,4 @@
-﻿//#define USE_VOLATILE_OPS
+﻿#define USE_VOLATILE_OPS
 
 using System;
 using System.Threading;
@@ -87,9 +87,15 @@ namespace StoreLoad
             while(true)
             {
                 first.WaitOne();
+#if USE_VOLATILE_OPS
+                Volatile.Write(ref x0, 1);
+                maybeMemoryBarrier();
+                Volatile.Write(ref r0, Volatile.Read(ref x1));
+#else
                 x0 = 1;
                 maybeMemoryBarrier();
                 r0 = x1;
+#endif
                 barrier.SignalAndWait();
             }
         }
@@ -100,9 +106,15 @@ namespace StoreLoad
             while(true)
             {
                 second.WaitOne();
+#if USE_VOLATILE_OPS
+                Volatile.Write(ref x1, 1);
+                maybeMemoryBarrier();
+                Volatile.Write(ref r1, Volatile.Read(ref x0));
+#else
                 x1 = 1;
                 maybeMemoryBarrier();
                 r1 = x0;
+#endif
                 barrier.SignalAndWait();
             }
         }
