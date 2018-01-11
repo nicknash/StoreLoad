@@ -1,4 +1,4 @@
-﻿//#define USE_VOLATILE_OPS
+﻿#define USE_VOLATILE_OPS
 
 using System;
 using System.Threading;
@@ -20,23 +20,44 @@ namespace StoreLoad
         private static int firstThreadRunCount;
         private static int secondThreadRunCount;
 
-        private static Barrier joinBarrier = new Barrier(3);
+        private static Barrier finishBarrier = new Barrier(3);
         private static Barrier startBarrier = new Barrier(3);
 
-        private static Action maybeMemoryBarrier;
-                private static int _dummy;
+        private static Action maybeMemoryFence;
+        private static int _cmpxchgDummy;
+
+        private enum MemoryFenceType 
+        {
+            None,
+            MemoryBarrier,
+            CompareExchange
+        }
+
+        private static Action GetMemoryFence(MemoryFenceType fenceType)
+        {
+            switch(fenceType)
+            {
+                case MemoryFenceType.None:
+                    return () => {};
+                case MemoryFenceType.MemoryBarrier:
+                    return Interlocked.MemoryBarrier;
+                case MemoryFenceType.CompareExchange:
+                    return () => {Interlocked.CompareExchange(ref _cmpxchgDummy, 0, 1);};               
+            }
+            throw new ArgumentOutOfRangeException(nameof(fenceType));
+        }
 
         public static void Main(string[] args)
         {
-            if(args.Length < 1)
+            if(args.Length < 2)
             {
-                Console.WriteLine("Usage: <number of iterations> [m]emory barriers on, use [c]mpxchg as barrier.");
+                Console.WriteLine("Usage: <number of iterations> <memory fence type>");
+                Console.WriteLine("Valid memory fence types: None, MemoryBarrier, CompareExchange");
                 return;
             }
-            bool useMemoryBarriers = args.Length >= 2;
-            // maybeMemoryBarrier = useMemoryBarriers ? (Action) Interlocked.MemoryBarrier : () => {};
-            maybeMemoryBarrier = useMemoryBarriers ? (Action) (() => {Interlocked.CompareExchange(ref _dummy, 0, 1);}) : () => {};
-            
+            var memoryFenceType = (MemoryFenceType) Enum.Parse(typeof(MemoryFenceType), args[1]);
+            maybeMemoryFence = GetMemoryFence(memoryFenceType);
+
             var firstThread = new Thread(FirstThreadFunction){IsBackground = true};
             var secondThread = new Thread(SecondThreadFunction){IsBackground = true};
             
@@ -54,7 +75,7 @@ namespace StoreLoad
                 x0 = x1 = 0;
 #endif
                 startBarrier.SignalAndWait();
-                joinBarrier.SignalAndWait(); // Ensure that they both actually ran
+                finishBarrier.SignalAndWait(); 
                 if(firstThreadRunCount != secondThreadRunCount)
                 {
                     Console.WriteLine($"Self-test failure: Both threads did not run a full iteration {firstThreadRunCount}/{secondThreadRunCount}");
@@ -78,21 +99,22 @@ namespace StoreLoad
             Console.WriteLine();
       
             Console.WriteLine($"{numNonSeqCst} of {numIterations} ({firstThreadRunCount}/{secondThreadRunCount}) iterations were not sequentially consistent.");
+            var usingMemoryFences = memoryFenceType != MemoryFenceType.None;
             if(numNonSeqCst > 0)
             {
                 Console.WriteLine($"That's about 1 in every " + numIterations / numNonSeqCst + " executions or " + 100 * numNonSeqCst / (float) numIterations + "%");
-                if(useMemoryBarriers)
+                if(usingMemoryFences)
                 {
-                    Console.WriteLine("That seems wrong as you're using memory barriers.");
+                    Console.WriteLine($"That seems wrong as you're using memory fences ({memoryFenceType})");
                 }
                 else
                 {
-                    Console.WriteLine("And that's OK, because you weren't using memory barriers.");
+                    Console.WriteLine("And that's OK, because you weren't using memory fences.");
                 }
             }
-            else if(useMemoryBarriers)
+            else if(usingMemoryFences)
             {
-                Console.WriteLine("And that's to be expected, because you were using memory barriers.");
+                Console.WriteLine("And that's to be expected, because you were using memory fences.");
             }
         }
         [MethodImplAttribute(MethodImplOptions.NoOptimization)]
@@ -103,15 +125,15 @@ namespace StoreLoad
                 startBarrier.SignalAndWait();
 #if USE_VOLATILE_OPS
                 Volatile.Write(ref x0, 1);
-                maybeMemoryBarrier();
+                maybeMemoryFence();
                 Volatile.Write(ref r0, Volatile.Read(ref x1));
 #else
                 x0 = 1;
-                maybeMemoryBarrier();
+                maybeMemoryFence();
                 r0 = x1;
 #endif
                 Interlocked.Increment(ref firstThreadRunCount);
-                joinBarrier.SignalAndWait();
+                finishBarrier.SignalAndWait();
             }
         }
 
@@ -123,15 +145,15 @@ namespace StoreLoad
                 startBarrier.SignalAndWait();
 #if USE_VOLATILE_OPS
                 Volatile.Write(ref x1, 1);
-                maybeMemoryBarrier();
+                maybeMemoryFence();
                 Volatile.Write(ref r1, Volatile.Read(ref x0));
 #else
                 x1 = 1;
-                maybeMemoryBarrier();
+                maybeMemoryFence();
                 r1 = x0;
 #endif
                 Interlocked.Increment(ref secondThreadRunCount);
-                joinBarrier.SignalAndWait();
+                finishBarrier.SignalAndWait();
             }
         }
     }
