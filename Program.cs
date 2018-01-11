@@ -1,4 +1,4 @@
-﻿#define USE_VOLATILE_OPS
+﻿//#define USE_VOLATILE_OPS
 
 using System;
 using System.Threading;
@@ -16,20 +16,26 @@ namespace StoreLoad
         private static int x0, x1;
         private static int r0, r1;
 #endif
-        private static AutoResetEvent first = new AutoResetEvent(false);
-        private static AutoResetEvent second = new AutoResetEvent(false);
-        private static Barrier barrier = new Barrier(3);
+
+        private static int firstThreadRunCount;
+        private static int secondThreadRunCount;
+
+        private static Barrier joinBarrier = new Barrier(3);
+        private static Barrier startBarrier = new Barrier(3);
 
         private static Action maybeMemoryBarrier;
+                private static int _dummy;
+
         public static void Main(string[] args)
         {
             if(args.Length < 1)
             {
-                Console.WriteLine("Usage: <number of iterations> [m]emory bariers on.");
+                Console.WriteLine("Usage: <number of iterations> [m]emory barriers on, use [c]mpxchg as barrier.");
                 return;
             }
             bool useMemoryBarriers = args.Length >= 2;
-            maybeMemoryBarrier = useMemoryBarriers ? (Action) Interlocked.MemoryBarrier : () => {};
+            // maybeMemoryBarrier = useMemoryBarriers ? (Action) Interlocked.MemoryBarrier : () => {};
+            maybeMemoryBarrier = useMemoryBarriers ? (Action) (() => {Interlocked.CompareExchange(ref _dummy, 0, 1);}) : () => {};
             
             var firstThread = new Thread(FirstThreadFunction){IsBackground = true};
             var secondThread = new Thread(SecondThreadFunction){IsBackground = true};
@@ -47,10 +53,18 @@ namespace StoreLoad
 #else
                 x0 = x1 = 0;
 #endif
-                first.Set(); // Allow the two threads to run
-                second.Set();
-                barrier.SignalAndWait(); // Ensure that they both actually ran
-                
+                startBarrier.SignalAndWait();
+                joinBarrier.SignalAndWait(); // Ensure that they both actually ran
+                if(firstThreadRunCount != secondThreadRunCount)
+                {
+                    Console.WriteLine($"Self-test failure: Both threads did not run a full iteration {firstThreadRunCount}/{secondThreadRunCount}");
+                    return;
+                } 
+                if(x0 != 1 || x1 != 1)
+                {
+                    Console.WriteLine($"Self-test failure: x0 = {x0}, x1 = {x1}");
+                    return;
+                }               
 #if USE_VOLATILE_OPS
                 if(Volatile.Read(ref r0) == 0 && Volatile.Read(ref r1) == 0)
 #else
@@ -58,11 +72,12 @@ namespace StoreLoad
 #endif                
                 {
                     ++numNonSeqCst;
-                    Console.WriteLine($"StoreLoad re-ordering #{numNonSeqCst} detected after {i + 1} iterations: x0 = {x0}, x1 = {x1}");
+                    Console.WriteLine($"StoreLoad re-ordering #{numNonSeqCst} detected after {i + 1} iterations ({firstThreadRunCount}/{secondThreadRunCount}): x0 = {x0}, x1 = {x1}");
                 }
             }
             Console.WriteLine();
-            Console.WriteLine($"{numNonSeqCst} of {numIterations} were not sequentially consistent.");
+      
+            Console.WriteLine($"{numNonSeqCst} of {numIterations} ({firstThreadRunCount}/{secondThreadRunCount}) iterations were not sequentially consistent.");
             if(numNonSeqCst > 0)
             {
                 Console.WriteLine($"That's about 1 in every " + numIterations / numNonSeqCst + " executions or " + 100 * numNonSeqCst / (float) numIterations + "%");
@@ -80,13 +95,12 @@ namespace StoreLoad
                 Console.WriteLine("And that's to be expected, because you were using memory barriers.");
             }
         }
-
         [MethodImplAttribute(MethodImplOptions.NoOptimization)]
         private static void FirstThreadFunction()
         {
             while(true)
             {
-                first.WaitOne();
+                startBarrier.SignalAndWait();
 #if USE_VOLATILE_OPS
                 Volatile.Write(ref x0, 1);
                 maybeMemoryBarrier();
@@ -96,7 +110,8 @@ namespace StoreLoad
                 maybeMemoryBarrier();
                 r0 = x1;
 #endif
-                barrier.SignalAndWait();
+                Interlocked.Increment(ref firstThreadRunCount);
+                joinBarrier.SignalAndWait();
             }
         }
 
@@ -105,7 +120,7 @@ namespace StoreLoad
         {
             while(true)
             {
-                second.WaitOne();
+                startBarrier.SignalAndWait();
 #if USE_VOLATILE_OPS
                 Volatile.Write(ref x1, 1);
                 maybeMemoryBarrier();
@@ -115,7 +130,8 @@ namespace StoreLoad
                 maybeMemoryBarrier();
                 r1 = x0;
 #endif
-                barrier.SignalAndWait();
+                Interlocked.Increment(ref secondThreadRunCount);
+                joinBarrier.SignalAndWait();
             }
         }
     }
