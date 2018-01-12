@@ -19,10 +19,7 @@ namespace StoreLoad
 
         private static int firstThreadRunCount;
         private static int secondThreadRunCount;
-
-        private static Barrier finishBarrier = new Barrier(3);
-        private static Barrier startBarrier = new Barrier(3);
-
+        private static Barrier syncBarrier = new Barrier(3);
         private static Action maybeMemoryFence;
         private static int _cmpxchgDummy;
 
@@ -74,8 +71,8 @@ namespace StoreLoad
 #else
                 x0 = x1 = 0;
 #endif
-                startBarrier.SignalAndWait();
-                finishBarrier.SignalAndWait(); 
+                syncBarrier.SignalAndWait();
+                syncBarrier.SignalAndWait();
                 if(firstThreadRunCount != secondThreadRunCount)
                 {
                     Console.WriteLine($"Self-test failure: Both threads did not run a full iteration {firstThreadRunCount}/{secondThreadRunCount}");
@@ -122,7 +119,7 @@ namespace StoreLoad
         {
             while(true)
             {
-                startBarrier.SignalAndWait();
+                syncBarrier.SignalAndWait();
 #if USE_VOLATILE_OPS
                 Volatile.Write(ref x0, 1);
                 maybeMemoryFence();
@@ -133,7 +130,7 @@ namespace StoreLoad
                 r0 = x1;
 #endif
                 Interlocked.Increment(ref firstThreadRunCount);
-                finishBarrier.SignalAndWait();
+                syncBarrier.SignalAndWait();    
             }
         }
 
@@ -142,7 +139,7 @@ namespace StoreLoad
         {
             while(true)
             {
-                startBarrier.SignalAndWait();
+                syncBarrier.SignalAndWait();
 #if USE_VOLATILE_OPS
                 Volatile.Write(ref x1, 1);
                 maybeMemoryFence();
@@ -153,7 +150,7 @@ namespace StoreLoad
                 r1 = x0;
 #endif
                 Interlocked.Increment(ref secondThreadRunCount);
-                finishBarrier.SignalAndWait();
+                syncBarrier.SignalAndWait();
             }
         }
     }
